@@ -2,6 +2,7 @@
 
 import os
 import datetime
+import configparser
 
 import numpy as np
 from PIL import Image
@@ -18,40 +19,42 @@ from scipy.misc import imresize
 from skimage.transform import resize, rotate
 from skimage import exposure
 
+configParser = configparser.RawConfigParser()
+configParser.read('transfer.cfg')
+
 # Params
-ITERATIONS = 5
+ITERATIONS = int(configParser.get('params', 'ITERATIONS'))
 CHANNELS = 3
-IMAGE_SIZE = 50
+IMAGE_SIZE = int(configParser.get('params', 'IMAGE_SIZE'))
 IMAGE_WIDTH = IMAGE_SIZE
 IMAGE_HEIGHT = IMAGE_SIZE
 IMAGENET_MEAN_RGB_VALUES = [123.68, 116.779, 103.939]
-CONTENT_WEIGHT = 3.5
-STYLE_WEIGHT_01 = 3.5
-STYLE_WEIGHT_02 = 3.5
-TOTAL_VARIATION_WEIGHT = 0.995
-TOTAL_VARIATION_LOSS_FACTOR = 1.25
+CONTENT_WEIGHT = float(configParser.get('params', 'CONTENT_WEIGHT'))
+STYLE_WEIGHT_01 = float(configParser.get('params', 'STYLE_WEIGHT_01'))
+STYLE_WEIGHT_02 = float(configParser.get('params', 'STYLE_WEIGHT_02'))
+TOTAL_VARIATION_WEIGHT = float(configParser.get('params', 'TOTAL_VARIATION_WEIGHT'))
+TOTAL_VARIATION_LOSS_FACTOR = float(configParser.get('params', 'TOTAL_VARIATION_LOSS_FACTOR'))
 
-POSTPROCESSING = True
-PP_brightness_min = 0.05
-PP_brightness_mult = 10
-PP_gamma = 2.0
+POSTPROCESSING = bool(configParser.get('params', 'POSTPROCESSING'))
+PP_brightness_min = float(configParser.get('params', 'PP_brightness_min'))
+PP_brightness_mult = float(configParser.get('params', 'PP_brightness_mult'))
+PP_gamma = float(configParser.get('params', 'PP_gamma'))
 
+DEBUG = bool(configParser.get('params', 'DEBUG'))
 MASK = True
 
-DEBUG = False
-
 # Files
-input_image_path = "input/portrait1.jpg"
-style_image_path_01 = "input/picasso.jpg"
-style_image_path_02 = "input/vangogh.jpg"
+input_image_file = configParser.get('files', 'input_image')
+style_image_01_file = configParser.get('files', 'style_image_01')
+style_image_02_file = configParser.get('files', 'style_image_02')
 
 saliency_model = "models/saliency_detection"
 
 CUSTOM_NAME = ""
 
-INPUT = os.path.basename(input_image_path)[:-4]
-STYLE1 = os.path.basename(style_image_path_01)[:-4]
-STYLE2 = os.path.basename(style_image_path_02)[:-4]
+INPUT = os.path.basename(input_image_file)[:-4]
+STYLE1 = os.path.basename(style_image_01_file)[:-4]
+STYLE2 = os.path.basename(style_image_02_file)[:-4]
 
 output_image_path = "output/{}_{}_{}_{}_{}{}/".format(INPUT, STYLE1, STYLE2, ITERATIONS, IMAGE_SIZE, CUSTOM_NAME)
 
@@ -59,7 +62,7 @@ if (not os.path.isdir(output_image_path)):
     os.mkdir(output_image_path)
 
 def preprocess(img):
-    res = Image.open(input_image_path)
+    res = Image.open(img)
     res = res.resize((IMAGE_WIDTH, IMAGE_HEIGHT))
     res = np.asarray(res, dtype="float32")
     res = np.expand_dims(res, axis=0)
@@ -68,9 +71,9 @@ def preprocess(img):
     res[:, :, :, 2] -= IMAGENET_MEAN_RGB_VALUES[0]
     return res[:, :, :, ::-1]
 
-input_image_array = preprocess(input_image_path)
-style_image_array_01 = preprocess(style_image_path_01)
-style_image_array_02 = preprocess(style_image_path_02)
+input_image_array = preprocess(input_image_file)
+style_image_array_01 = preprocess(style_image_01_file)
+style_image_array_02 = preprocess(style_image_02_file)
 
 # Model
 input_image = backend.variable(input_image_array)
@@ -137,8 +140,7 @@ if MASK:
             print("Mask MAX: {}".format(np.amax(mask)))
             print("Mask MIN: {}".format(np.amin(mask)))
         
-        if DEBUG:
-            imageio.imsave(output_image_path + "mask_" + os.path.basename(input_image_path), mask)
+        imageio.imsave(output_image_path + "mask_" + os.path.basename(input_image_file), mask)
         
         mask = np.squeeze(mask)
    
@@ -170,10 +172,11 @@ for layer_name in style_layers:
         print("Style_Mask_Inv MIN: {}".format(np.amin(style_mask_inv)))
         
         #debugging
-        imageio.imsave(output_image_path + layer_name + "_mask.jpg", style_mask)
-        imageio.imsave(output_image_path + layer_name + "_mask_inv.jpg", style_mask_inv)
-        print(np.amax(style_mask))
-        print(np.amin(style_mask))
+        if DEBUG:
+            imageio.imsave(output_image_path + layer_name + "_mask.jpg", style_mask)
+            imageio.imsave(output_image_path + layer_name + "_mask_inv.jpg", style_mask_inv)
+            print(np.amax(style_mask))
+            print(np.amin(style_mask))
         
         #normalize mask [0,1]
         style_mask = (style_mask - np.amin(style_mask)) / (np.amax(style_mask) - np.amin(style_mask))
@@ -268,33 +271,34 @@ for i in range(ITERATIONS):
 combined = Image.new("RGB", (IMAGE_WIDTH*5, IMAGE_HEIGHT))
 x_offset = 0
 
-images = [output_image_path + os.path.basename(input_image_path),
-          output_image_path + "mask_" + os.path.basename(input_image_path),
-          output_image_path + os.path.basename(style_image_path_01),
-          output_image_path + os.path.basename(style_image_path_02),
+images = [output_image_path + os.path.basename(input_image_file),
+          output_image_path + "mask_" + os.path.basename(input_image_file),
+          output_image_path + os.path.basename(style_image_01),
+          output_image_path + os.path.basename(style_image_02),
           output_image_path + "{}.png".format(ITERATIONS)]
 
 for image in map(Image.open, images):
     combined.paste(image, (x_offset, 0))
     x_offset += IMAGE_WIDTH
-combined.save(output_image_path + "combined.png")
+combined.save(output_image + "combined.png")
 """
 
-# Write Logfile with settings
-with open(output_image_path + "settings.txt", "w+") as file:
-    file.write("DATE: {}\n".format(datetime.datetime.now()))
-    file.write("ITERATIONS: {}\n".format(ITERATIONS))
-    file.write("IMAGE_SIZE: {}\n".format(IMAGE_SIZE))
-    file.write("CONTENT_WEIGHT({}): {}\n".format(INPUT, CONTENT_WEIGHT))
-    file.write("STYLE_WEIGHT_01({}): {}\n".format(STYLE1, STYLE_WEIGHT_01))
-    file.write("STYLE_WEIGHT_02({}): {}\n".format(STYLE2, STYLE_WEIGHT_02))
-    file.write("TOTAL_VARIATION_WEIGHT: {}\n".format(TOTAL_VARIATION_WEIGHT))
-    file.write("TOTAL_VARIATION_LOSS_FACTOR: {}\n".format(TOTAL_VARIATION_LOSS_FACTOR))
-    file.write("\nMASK: {}\n".format(MASK))
-    file.write("\nPP: {}\n".format(POSTPROCESSING))
-    file.write("PP brightness min : {}\n".format(PP_brightness_min))
-    file.write("PP brightness mul: {}\n".format(PP_brightness_mult))
-    file.write("PP gamma: {}\n".format(PP_gamma))
-    
-    for i, loss in enumerate(logged_loss):
-        file.write("\nLoss in Iteration {}: {}".format(i, loss))
+if DEBUG:
+    # Write Logfile with settings
+    with open(output_image_path + "settings.txt", "w+") as file:
+        file.write("DATE: {}\n".format(datetime.datetime.now()))
+        file.write("ITERATIONS: {}\n".format(ITERATIONS))
+        file.write("IMAGE_SIZE: {}\n".format(IMAGE_SIZE))
+        file.write("CONTENT_WEIGHT({}): {}\n".format(INPUT, CONTENT_WEIGHT))
+        file.write("STYLE_WEIGHT_01({}): {}\n".format(STYLE1, STYLE_WEIGHT_01))
+        file.write("STYLE_WEIGHT_02({}): {}\n".format(STYLE2, STYLE_WEIGHT_02))
+        file.write("TOTAL_VARIATION_WEIGHT: {}\n".format(TOTAL_VARIATION_WEIGHT))
+        file.write("TOTAL_VARIATION_LOSS_FACTOR: {}\n".format(TOTAL_VARIATION_LOSS_FACTOR))
+        file.write("\nMASK: {}\n".format(MASK))
+        file.write("\nPP: {}\n".format(POSTPROCESSING))
+        file.write("PP brightness min : {}\n".format(PP_brightness_min))
+        file.write("PP brightness mul: {}\n".format(PP_brightness_mult))
+        file.write("PP gamma: {}\n".format(PP_gamma))
+        
+        for i, loss in enumerate(logged_loss):
+            file.write("\nLoss in Iteration {}: {}".format(i, loss))
