@@ -28,25 +28,27 @@ IMAGE_SIZE = 250
 IMAGE_WIDTH = IMAGE_SIZE
 IMAGE_HEIGHT = IMAGE_SIZE
 IMAGENET_MEAN_RGB_VALUES = [123.68, 116.779, 103.939]
-CONTENT_WEIGHT = 0.4
+CONTENT_WEIGHT = 3.5
 STYLE_WEIGHT_01 = 3.5
-STYLE_WEIGHT_02 = 2.5
+STYLE_WEIGHT_02 = 3.5
 TOTAL_VARIATION_WEIGHT = 0.995
 TOTAL_VARIATION_LOSS_FACTOR = 1.25
 
-POSTPROCESSING = False
+POSTPROCESSING = True
 PP_brightness_min = 0.05
 PP_brightness_mult = 10
-PP_gamma = 2
+PP_gamma = 2.0
+
+MASK = True
 
 # Paths
 input_image_path = "content_images/portrait1.jpg"
 style_image_path_01 = "style_images/opart.jpg"
 style_image_path_02 = "style_images/camouflage.jpg"
 
-saliency_model = "saliency_model/model_30000b_20bsize_0.001lr"
+saliency_model = "models/saliency_detection"
 
-CUSTOM_NAME = "_no_post"
+CUSTOM_NAME = "_post_06"
 
 INPUT = os.path.basename(input_image_path)[:-4]
 STYLE1 = os.path.basename(style_image_path_01)[:-4]
@@ -135,41 +137,34 @@ def get_test_mask():
 
 mask = get_test_mask()
 
-with tf.Session() as sess:
-    saver = tf.train.import_meta_graph(saliency_model + ".meta")
-    saver.restore(sess, saliency_model)
-    
-    graph = tf.get_default_graph()
-    
-    x = graph.get_tensor_by_name("X:0")
-    is_training = graph.get_tensor_by_name("is_training:0")
-    
-    resized_input_image = resize(input_image_array, (1, 180, 320, 3))
-    pred_saliency = sess.run("loss/prediction:0", feed_dict={x: resized_input_image, is_training: False})
-    
-    mask = resize(pred_saliency[0,:,:,:], output_shape=(IMAGE_SIZE,IMAGE_SIZE,1))
-    
-    if(POSTPROCESSING):
-        mask[mask > 0.05] *= 10
+if MASK:
+    with tf.Session() as sess:
+        saver = tf.train.import_meta_graph(saliency_model + ".meta")
+        saver.restore(sess, saliency_model)
         
-        print(np.amax(mask))
-        mask[mask > 1.0] = 1.0
-        print(np.amax(mask))
+        graph = tf.get_default_graph()
         
-        mask = exposure.adjust_gamma(mask, 2)
+        x = graph.get_tensor_by_name("X:0")
+        is_training = graph.get_tensor_by_name("is_training:0")
         
-        print(np.amax(mask))
+        resized_input_image = resize(input_image_array, (1, 180, 320, 3))
+        pred_saliency = sess.run("loss/prediction:0", feed_dict={x: resized_input_image, is_training: False})
         
-        mask[mask > 1.0] = 1.0
+        mask = resize(pred_saliency[0,:,:,:], output_shape=(IMAGE_SIZE,IMAGE_SIZE,1))
         
-        print("Mask MAX: {}".format(np.amax(mask)))
-        print("Mask MIN: {}".format(np.amin(mask)))
-    
-    imageio.imsave(output_image_path + "mask_" + os.path.basename(input_image_path), mask)
-    
-    mask = np.squeeze(mask)
+        if POSTPROCESSING:
+            mask[mask > 0.05] *= 10
+            mask = exposure.adjust_gamma(mask, 2)  
+            mask[mask > 1.0] = 1.0
+            
+            print("Mask MAX: {}".format(np.amax(mask)))
+            print("Mask MIN: {}".format(np.amin(mask)))
+        
+        imageio.imsave(output_image_path + "mask_" + os.path.basename(input_image_path), mask)
+        
+        mask = np.squeeze(mask)
    
-print("\n=== GENERATED MASK ===\n")
+    print("\n=== GENERATED MASK ===\n")
 
 style_layers = ["block1_conv2", "block2_conv2", "block3_conv3", "block4_conv3", "block5_conv3"]
 for layer_name in style_layers:
@@ -183,52 +178,61 @@ for layer_name in style_layers:
     layer_size = style_features_01.shape[0]
     layer_depth = style_features_01.shape[2]
     
-    style_mask = imresize(mask, (layer_size, layer_size)) / 255.0
-    
-    #normalize 0-1 
-    style_mask = (style_mask - np.amin(style_mask)) / (np.amax(style_mask) - np.amin(style_mask))
-    
-    style_mask_inv = 1 - style_mask
-    
-    print("Style_Mask MAX: {}".format(np.amax(style_mask)))
-    print("Style_Mask MIN: {}".format(np.amin(style_mask)))
-    print("Style_Mask_Inv MAX: {}".format(np.amax(style_mask_inv)))
-    print("Style_Mask_Inv MIN: {}".format(np.amin(style_mask_inv)))
-    
-    #debugging
-    imageio.imsave(output_image_path + layer_name + "_mask.jpg", style_mask)
-    imageio.imsave(output_image_path + layer_name + "_mask_inv.jpg", style_mask_inv)
-    print(np.amax(style_mask))
-    print(np.amin(style_mask))
-    
-    #normalize mask [0,1]
-    style_mask = (style_mask - np.amin(style_mask)) / (np.amax(style_mask) - np.amin(style_mask))
-    style_mask_inv = 1 - style_mask
-    
-    #for some reason the mask gets rotated later, so counter-rotate now 
-    style_mask = rotate(style_mask, 90)
-    style_mask_inv = rotate(style_mask_inv, 90)
+    if MASK:
+        style_mask = imresize(mask, (layer_size, layer_size)) / 255.0
 
-    # stack mask layer to fit number of feature maps
-    style_mask = np.array([style_mask for _ in range(layer_depth)]).transpose()
-    style_mask_inv = np.array([style_mask_inv for _ in range(layer_depth)]).transpose()
+        #normalize 0-1 
+        style_mask = (style_mask - np.amin(style_mask)) / (np.amax(style_mask) - np.amin(style_mask))
+        
+        style_mask_inv = 1 - style_mask
+        
+        print("Style_Mask MAX: {}".format(np.amax(style_mask)))
+        print("Style_Mask MIN: {}".format(np.amin(style_mask)))
+        print("Style_Mask_Inv MAX: {}".format(np.amax(style_mask_inv)))
+        print("Style_Mask_Inv MIN: {}".format(np.amin(style_mask_inv)))
+        
+        #debugging
+        imageio.imsave(output_image_path + layer_name + "_mask.jpg", style_mask)
+        imageio.imsave(output_image_path + layer_name + "_mask_inv.jpg", style_mask_inv)
+        print(np.amax(style_mask))
+        print(np.amin(style_mask))
+        
+        #normalize mask [0,1]
+        style_mask = (style_mask - np.amin(style_mask)) / (np.amax(style_mask) - np.amin(style_mask))
+        style_mask_inv = 1 - style_mask
+        
+        #for some reason the mask gets rotated later, so counter-rotate now 
+        style_mask = rotate(style_mask, 90)
+        style_mask_inv = rotate(style_mask_inv, 90)
+        
+        #for some reason the mask gets flipped-LR, so undo that, too...
+        style_mask = np.flipud(style_mask)
+        style_mask_inv = np.flipud(style_mask_inv)
     
-    #apply mask
-    style_features_01 = tf.multiply(style_features_01, style_mask)
-    style_features_02 = tf.multiply(style_features_02, style_mask_inv)
+        # stack mask layer to fit number of feature maps
+        style_mask = np.array([style_mask for _ in range(layer_depth)]).transpose()
+        style_mask_inv = np.array([style_mask_inv for _ in range(layer_depth)]).transpose()
+        
+        #apply mask
+        style_features_01 = tf.multiply(style_features_01, style_mask)
+        style_features_02 = tf.multiply(style_features_02, style_mask_inv)
+        
+        combination_features_01 = tf.multiply(combination_features, style_mask)
+        combination_features_02 = tf.multiply(combination_features, style_mask_inv)
+        
+        style_loss_01 = compute_style_loss(style_features_01, combination_features_01)
+        loss += (STYLE_WEIGHT_01 / len(style_layers)) * style_loss_01
+        
+        style_loss_02 = compute_style_loss(style_features_02, combination_features_02)   
+        loss += (STYLE_WEIGHT_02 / len(style_layers)) * style_loss_02
     
-    combination_features_01 = tf.multiply(combination_features, style_mask)
-    combination_features_02 = tf.multiply(combination_features, style_mask_inv)
-    
+    else:
+        style_loss = compute_style_loss(style_features_02, combination_features)   
+        loss += (STYLE_WEIGHT_02 / len(style_layers)) * style_loss
+        
 #    print("{} shape: {}".format(layer_name, style_features_01.shape))
-    
-    style_loss_01 = compute_style_loss(style_features_01, combination_features_01)
-    style_loss_02 = compute_style_loss(style_features_02, combination_features_02)
-#    style_loss_01 = compute_style_loss(style_features_01, combination_features)
-#    style_loss_02 = compute_style_loss(style_features_02, combination_features)
-    
-    loss += (STYLE_WEIGHT_01 / len(style_layers)) * style_loss_01
-    loss += (STYLE_WEIGHT_02 / len(style_layers)) * style_loss_02
+   
+
     
 def total_variation_loss(x):
     a = backend.square(x[:, :IMAGE_HEIGHT-1, :IMAGE_WIDTH-1, :] - x[:, 1:, :IMAGE_WIDTH-1, :])
@@ -268,7 +272,7 @@ logged_loss = []
 for i in range(ITERATIONS):
     i += 1
     x, loss, _ = fmin_l_bfgs_b(evaluator.loss, x.flatten(), fprime=evaluator.gradients, maxfun=20)
-    print("=== ITERATION %d COMPLETED: LOSS %d ===" % (i, loss))
+    print("=== ITERATION {} COMPLETED: LOSS {} ===".format(i, loss))
     
     logged_loss.append(loss)
     
@@ -308,6 +312,11 @@ with open(output_image_path + "settings.txt", "w+") as file:
     file.write("STYLE_WEIGHT_02({}): {}\n".format(STYLE2, STYLE_WEIGHT_02))
     file.write("TOTAL_VARIATION_WEIGHT: {}\n".format(TOTAL_VARIATION_WEIGHT))
     file.write("TOTAL_VARIATION_LOSS_FACTOR: {}\n".format(TOTAL_VARIATION_LOSS_FACTOR))
+    file.write("\nMASK: {}\n".format(MASK))
+    file.write("\nPP: {}\n".format(POSTPROCESSING))
+    file.write("PP brightness min : {}\n".format(PP_brightness_min))
+    file.write("PP brightness mul: {}\n".format(PP_brightness_mult))
+    file.write("PP gamma: {}\n".format(PP_gamma))
     
     for i, loss in enumerate(logged_loss):
         file.write("\nLoss in Iteration {}: {}".format(i, loss))
