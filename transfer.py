@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Sat Jun  1 12:18:01 2019
-"""
-# Imports
+
 import os
 import datetime
 
@@ -21,10 +18,10 @@ from scipy.misc import imresize
 from skimage.transform import resize, rotate
 from skimage import exposure
 
-# Hyperparams
+# Params
 ITERATIONS = 5
 CHANNELS = 3
-IMAGE_SIZE = 250
+IMAGE_SIZE = 50
 IMAGE_WIDTH = IMAGE_SIZE
 IMAGE_HEIGHT = IMAGE_SIZE
 IMAGENET_MEAN_RGB_VALUES = [123.68, 116.779, 103.939]
@@ -41,14 +38,16 @@ PP_gamma = 2.0
 
 MASK = True
 
-# Paths
-input_image_path = "content_images/portrait1.jpg"
-style_image_path_01 = "style_images/opart.jpg"
-style_image_path_02 = "style_images/camouflage.jpg"
+DEBUG = False
+
+# Files
+input_image_path = "input/portrait1.jpg"
+style_image_path_01 = "input/picasso.jpg"
+style_image_path_02 = "input/vangogh.jpg"
 
 saliency_model = "models/saliency_detection"
 
-CUSTOM_NAME = "_post_06"
+CUSTOM_NAME = ""
 
 INPUT = os.path.basename(input_image_path)[:-4]
 STYLE1 = os.path.basename(style_image_path_01)[:-4]
@@ -59,41 +58,19 @@ output_image_path = "output/{}_{}_{}_{}_{}{}/".format(INPUT, STYLE1, STYLE2, ITE
 if (not os.path.isdir(output_image_path)):
     os.mkdir(output_image_path)
 
-#Input visualization 
-input_image = Image.open(input_image_path)
-input_image = input_image.resize((IMAGE_WIDTH, IMAGE_HEIGHT))
-input_image.save(output_image_path + os.path.basename(input_image_path))
+def preprocess(img):
+    res = Image.open(input_image_path)
+    res = res.resize((IMAGE_WIDTH, IMAGE_HEIGHT))
+    res = np.asarray(res, dtype="float32")
+    res = np.expand_dims(res, axis=0)
+    res[:, :, :, 0] -= IMAGENET_MEAN_RGB_VALUES[2]
+    res[:, :, :, 1] -= IMAGENET_MEAN_RGB_VALUES[1]
+    res[:, :, :, 2] -= IMAGENET_MEAN_RGB_VALUES[0]
+    return res[:, :, :, ::-1]
 
-# Style visualization 
-style_image_01 = Image.open(style_image_path_01)
-style_image_01 = style_image_01.resize((IMAGE_WIDTH, IMAGE_HEIGHT))
-style_image_01.save(output_image_path + os.path.basename(style_image_path_01))
-
-style_image_02 = Image.open(style_image_path_02)
-style_image_02 = style_image_02.resize((IMAGE_WIDTH, IMAGE_HEIGHT))
-style_image_02.save(output_image_path + os.path.basename(style_image_path_02))
-
-# Data normalization and reshaping from RGB to BGR
-input_image_array = np.asarray(input_image, dtype="float32")
-input_image_array = np.expand_dims(input_image_array, axis=0)
-input_image_array[:, :, :, 0] -= IMAGENET_MEAN_RGB_VALUES[2]
-input_image_array[:, :, :, 1] -= IMAGENET_MEAN_RGB_VALUES[1]
-input_image_array[:, :, :, 2] -= IMAGENET_MEAN_RGB_VALUES[0]
-input_image_array = input_image_array[:, :, :, ::-1]
-
-style_image_array_01 = np.asarray(style_image_01, dtype="float32")
-style_image_array_01 = np.expand_dims(style_image_array_01, axis=0)
-style_image_array_01[:, :, :, 0] -= IMAGENET_MEAN_RGB_VALUES[2]
-style_image_array_01[:, :, :, 1] -= IMAGENET_MEAN_RGB_VALUES[1]
-style_image_array_01[:, :, :, 2] -= IMAGENET_MEAN_RGB_VALUES[0]
-style_image_array_01 = style_image_array_01[:, :, :, ::-1]
-
-style_image_array_02 = np.asarray(style_image_02, dtype="float32")
-style_image_array_02 = np.expand_dims(style_image_array_02, axis=0)
-style_image_array_02[:, :, :, 0] -= IMAGENET_MEAN_RGB_VALUES[2]
-style_image_array_02[:, :, :, 1] -= IMAGENET_MEAN_RGB_VALUES[1]
-style_image_array_02[:, :, :, 2] -= IMAGENET_MEAN_RGB_VALUES[0]
-style_image_array_02 = style_image_array_02[:, :, :, ::-1]
+input_image_array = preprocess(input_image_path)
+style_image_array_01 = preprocess(style_image_path_01)
+style_image_array_02 = preprocess(style_image_path_02)
 
 # Model
 input_image = backend.variable(input_image_array)
@@ -160,7 +137,8 @@ if MASK:
             print("Mask MAX: {}".format(np.amax(mask)))
             print("Mask MIN: {}".format(np.amin(mask)))
         
-        imageio.imsave(output_image_path + "mask_" + os.path.basename(input_image_path), mask)
+        if DEBUG:
+            imageio.imsave(output_image_path + "mask_" + os.path.basename(input_image_path), mask)
         
         mask = np.squeeze(mask)
    
@@ -231,9 +209,7 @@ for layer_name in style_layers:
         loss += (STYLE_WEIGHT_02 / len(style_layers)) * style_loss
         
 #    print("{} shape: {}".format(layer_name, style_features_01.shape))
-   
 
-    
 def total_variation_loss(x):
     a = backend.square(x[:, :IMAGE_HEIGHT-1, :IMAGE_WIDTH-1, :] - x[:, 1:, :IMAGE_WIDTH-1, :])
     b = backend.square(x[:, :IMAGE_HEIGHT-1, :IMAGE_WIDTH-1, :] - x[:, :IMAGE_HEIGHT-1, 1:, :])
@@ -288,6 +264,7 @@ for i in range(ITERATIONS):
     
 
 # Visualizing and saving combined results
+"""
 combined = Image.new("RGB", (IMAGE_WIDTH*5, IMAGE_HEIGHT))
 x_offset = 0
 
@@ -301,6 +278,7 @@ for image in map(Image.open, images):
     combined.paste(image, (x_offset, 0))
     x_offset += IMAGE_WIDTH
 combined.save(output_image_path + "combined.png")
+"""
 
 # Write Logfile with settings
 with open(output_image_path + "settings.txt", "w+") as file:
